@@ -17,7 +17,7 @@ def load_pb(path_to_pb):
 
 model_path = './weights/weights_plate_v1.0.0.pb'
 graph = load_pb(model_path)
-sess = tf.compat.v1.Session(graph=graph)
+sess = tf.function(graph)
 
 
 
@@ -26,24 +26,29 @@ num_det = graph.get_tensor_by_name('num_detections: 0')
 det_scores = graph.get_tensor_by_name('detection_scores: 0')
 det_boxes = graph.get_tensor_by_name('detection_boxes: 0')
 
-before = time.time()
-print(before)
+image = cv2.imread('./images/10.jpg')
+np_images = np.array([image])
+num_boxes, scores, boxes = sess.run([num_det, det_scores, det_boxes], feed_dict={image_tensor: np_images})
 
-for i in range(100):
-    image = cv2.imread('./images/10.jpg')
-    np_images = np.array([image])
-    num_boxes, scores, boxes = sess.run([num_det, det_scores, det_boxes], feed_dict={image_tensor: np_images})
 
-after = time.time()
-print(after)
+#before = time.time()
+#print(before)
 
-print("total time used:", (after - before))
+#for i in range(300):
+#    image = cv2.imread('./images/10.jpg')
+#    np_images = np.array([image])
+#    num_boxes, scores, boxes = sess.run([num_det, det_scores, det_boxes], feed_dict={image_tensor: np_images})
 
-rets = []
+#after = time.time()
+#print(after)
 
-for i in range(len(scores[0])):
-    if scores[0][i] > 0.01:
-        rets.append(boxes[0][i].tolist())
+#print("total time used:", (after - before))
+
+#rets = []
+#
+#for i in range(len(scores[0])):
+#    if scores[0][i] > 0.01:
+#        rets.append(boxes[0][i].tolist())
 
 
 #ret_img = tf.image.draw_bounding_boxes(np_images, [rets], [[255, 0, 0]])

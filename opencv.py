@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
  
 #1、imread加载图片
-img = cv2.imread('./images/07.jpg')
+img = cv2.imread('./images/04.jpg')
  
 #2、将图像转换为灰度图
  
