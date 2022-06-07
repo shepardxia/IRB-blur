@@ -1,8 +1,12 @@
+import numpy as np
 import cv2
+import time
 
+one = np.ones((255, 255, 3))
+pts = np.array([[[1, 1], [10, 10], [120, 120], [200, 200]]])
+bef = time.time()
+for i in range(1000000):
+    cv2.fillPoly(one, pts, color=(0, 0, 0))
+aft = time.time()
+print('time taken is:', aft - bef)
 
-im = cv2.imread('./images/13.jpg')
-size = im.shape[:2][::-1]
-author = cv2.VideoWriter('./images/demo.mp4', cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, size)
-for i in range(10):
-    author.write(im)

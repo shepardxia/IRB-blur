@@ -3,8 +3,8 @@ import cv2
 import time
 from matplotlib.transforms import BboxBase
 import numpy as np
-from iwpod_net.src.keras_utils import load_model, detect_lp_width
-from iwpod_net.src.utils import im2single
+from iwpod_net.src.keras_utils import *
+from iwpod_net.src.utils import *
 import os.path as osp
 import sys
 from CenterTrack_ROOT.src._init_paths import add_path
@@ -19,7 +19,19 @@ add_path(lib_path)
 from crop_detector import Detector
 from opts import opts
 
+#def find_LP():
+    
+    # rewrite detect_LP_width
 
+    # resize
+
+    # put through prediction 
+
+    # reconsturct batch
+
+    # convert back to original coordinates
+
+    # 
 
 class blacker():
     def __init__(self, read_path, write_path):
@@ -67,27 +79,61 @@ class blacker():
     def locate_LP(self, crops):
         ptss = []
         lp_output_resolution = tuple((240, 80))
+        #crops_resized = np.array((len(crops), 56, 64, 3))
         for crop in crops:
-            print(crop.shape)
+            #crops_resized[i] = cv2.resize(crops[i],(64, 56), interpolation = cv2.INTER_CUBIC)
+
+            
+            
             iwh = np.array(crop.shape[1::-1],dtype=float).reshape((2,1))
+            print('iwh has shape', iwh.shape)
             ASPECTRATIO = max(1, min(2.75, 1.0*crop.shape[1]/crop.shape[0]))  # width over height
             WPODResolution = 256
             Llp, LlpImgs, _ = detect_lp_width(self.iwpod_net, im2single(crop), WPODResolution*ASPECTRATIO, 2**1, lp_output_resolution, 0.01)
             for i, img in enumerate(LlpImgs):
                 pts = Llp[i].pts * iwh
                 self.black(crop, pts)
+            
+        return ptss
+
+    def locate_LP_alt(self, crops):
+        ptss = []
+        lp_output_resolution = tuple((240, 80))
+        crops_resized = np.zeros((len(crops), 56, 64, 3))
+        iwhs = np.zeros((len(crops), 2, 1))
+        for i in range(len(crops)):
+            crops_resized[i] = im2single(cv2.resize(crops[i],(64, 56), interpolation = cv2.INTER_CUBIC))
+            iwhs[i] = np.array(crops[i].shape[1::-1],dtype=float).reshape((2,1))
+        
+        results = self.iwpod_net.predict(crops_resized)
+        
+        for i in range(len(crops)):
+            label, TLps = reconstruct_new(crops[i], crops_resized[i], results[i], lp_output_resolution, 0.01)
+            label, TLps = FindBestLP(label, TLps)
+            for j, img in enumerate(TLps):
+                pts = label[j].pts * iwhs[i]
+                self.black(crops[i], pts)
         return ptss
 
     def step(self):
+        time_one = time.time()
         ret, frame = self.vid.read()
+        time_two = time.time()
+        print('read took time:', time_two - time_one)
         if not ret:
             return False
         #cv2.imshow('frame', frame)
         #cv2.waitKey(0)
         bboxes_vehicle = self.locate_vehicles(frame)
         crops = self.crop_vehicle(frame, bboxes_vehicle)
-        self.locate_LP(crops)
+        time_three = time.time()
+        print('ct took time:', time_three - time_two)
+        self.locate_LP_alt(crops)
+        time_four = time.time()
+        print('LP took time:', time_four - time_three)
         self.writer.write(frame)
+        time_five = time.time()
+        print('write took time:', time_five - time_four)
         return True
 
     def run(self):
