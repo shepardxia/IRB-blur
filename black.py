@@ -8,6 +8,7 @@ from iwpod_net.src.utils import *
 import os.path as osp
 import sys
 from CenterTrack_ROOT.src._init_paths import add_path
+import tensorflow as tf
 
 this_dir = osp.dirname(__file__)
 
@@ -64,7 +65,7 @@ class blacker():
         bboxes = []
         for item in self.ct.tracker.tracks:
             bboxes.append(item['bbox'])
-            cv2.rectangle(frame, ((int)(item['bbox'][0]), (int)(item['bbox'][1])), ((int)(item['bbox'][2]), (int)(item['bbox'][3])), (0, 255, 0), 2)
+            # cv2.rectangle(frame, ((int)(item['bbox'][0]), (int)(item['bbox'][1])), ((int)(item['bbox'][2]), (int)(item['bbox'][3])), (0, 255, 0), 2)
         self.count += 1
         return bboxes
 
@@ -99,13 +100,16 @@ class blacker():
     def locate_LP_alt(self, crops):
         ptss = []
         lp_output_resolution = tuple((240, 80))
-        crops_resized = np.zeros((len(crops), 56, 64, 3))
+        crops_resized = np.zeros((len(crops), 48, 48, 3))
         iwhs = np.zeros((len(crops), 2, 1))
         for i in range(len(crops)):
-            crops_resized[i] = im2single(cv2.resize(crops[i],(64, 56), interpolation = cv2.INTER_CUBIC))
-            iwhs[i] = np.array(crops[i].shape[1::-1],dtype=float).reshape((2,1))
-        
+            crops_resized[i] = im2single(tf.image.resize_with_pad(crops[i], 48, 48).numpy().astype(np.uint8))
+            #cv2.imshow('hu', tf.image.resize_with_pad(crops[i], 56, 64).numpy().astype(np.uint8))
+            #cv2.waitKey(0)
+            s = max(crops[i].shape[1::-1])
+            iwhs[i] = np.array([s, s],dtype=float).reshape((2,1))
         results = self.iwpod_net.predict(crops_resized)
+        print(results.shape)
         
         for i in range(len(crops)):
             label, TLps = reconstruct_new(crops[i], crops_resized[i], results[i], lp_output_resolution, 0.01)
@@ -137,7 +141,7 @@ class blacker():
         return True
 
     def run(self):
-        while self.step():
+        while self.step() and self.count <= 2:
             print(self.count)
             pass
         self.writer.release()
@@ -150,11 +154,6 @@ if __name__ == '__main__':
     black.run()
     aft = time.time()
     print('Time: ', aft - bef)
-    im = cv2.imread('./images/15.jpg')
-    print(im.shape)
-    black.black([im], black.locate_LP([im]))
-    cv2.imshow('im', im)
-    cv2.waitKey(0)
 #bef = time.time()
 #for i in range(10):
 #    obj.step()
