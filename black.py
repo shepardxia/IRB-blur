@@ -87,7 +87,6 @@ class blacker():
             
             
             iwh = np.array(crop.shape[1::-1],dtype=float).reshape((2,1))
-            print('iwh has shape', iwh.shape)
             ASPECTRATIO = max(1, min(2.75, 1.0*crop.shape[1]/crop.shape[0]))  # width over height
             WPODResolution = 256
             Llp, LlpImgs, _ = detect_lp_width(self.iwpod_net, im2single(crop), WPODResolution*ASPECTRATIO, 2**1, lp_output_resolution, 0.01)
@@ -109,7 +108,6 @@ class blacker():
             s = max(crops[i].shape[1::-1])
             iwhs[i] = np.array([s, s],dtype=float).reshape((2,1))
         results = self.iwpod_net.predict(crops_resized)
-        print(results.shape)
         
         for i in range(len(crops)):
             label, TLps = reconstruct_new(crops[i], crops_resized[i], results[i], lp_output_resolution, 0.01)
@@ -141,7 +139,7 @@ class blacker():
         return True
 
     def run(self):
-        while self.step() and self.count <= 2:
+        while self.step():
             print(self.count)
             pass
         self.writer.release()
