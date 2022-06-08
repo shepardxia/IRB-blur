@@ -9,6 +9,8 @@ import os.path as osp
 import sys
 from CenterTrack_ROOT.src._init_paths import add_path
 import tensorflow as tf
+from torchvision.ops import nms 
+import torch
 
 this_dir = osp.dirname(__file__)
 
@@ -63,9 +65,17 @@ class blacker():
         else:
             ret, f_time = self.ct.run(frame, 0)
         bboxes = []
+        scores = []
         for item in self.ct.tracker.tracks:
+            scores.append(item['score'])
             bboxes.append(item['bbox'])
             # cv2.rectangle(frame, ((int)(item['bbox'][0]), (int)(item['bbox'][1])), ((int)(item['bbox'][2]), (int)(item['bbox'][3])), (0, 255, 0), 2)
+        print(len(scores))
+        scores = torch.Tensor(scores)
+        bboxes = torch.Tensor(bboxes)
+        idx = nms(bboxes, scores, 0.5)
+        print(len(idx))
+        bboxes = bboxes[idx]
         self.count += 1
         return bboxes
 
@@ -73,6 +83,8 @@ class blacker():
         crops = []
         for box in bboxes:
             crop = frame[int(box[1]):int(box[3]), int(box[0]):int(box[2]), :]
+            if 0 in crop.shape:
+                continue
             crops.append(crop)
         return crops
 
@@ -99,10 +111,10 @@ class blacker():
     def locate_LP_alt(self, crops):
         ptss = []
         lp_output_resolution = tuple((240, 80))
-        crops_resized = np.zeros((len(crops), 48, 48, 3))
+        crops_resized = np.zeros((len(crops), 96, 96, 3))
         iwhs = np.zeros((len(crops), 2, 1))
         for i in range(len(crops)):
-            crops_resized[i] = im2single(tf.image.resize_with_pad(crops[i], 48, 48).numpy().astype(np.uint8))
+            crops_resized[i] = im2single(tf.image.resize_with_pad(crops[i], 96, 96).numpy().astype(np.uint8))
             #cv2.imshow('hu', tf.image.resize_with_pad(crops[i], 56, 64).numpy().astype(np.uint8))
             #cv2.waitKey(0)
             s = max(crops[i].shape[1::-1])
@@ -114,6 +126,11 @@ class blacker():
             label, TLps = FindBestLP(label, TLps)
             for j, img in enumerate(TLps):
                 pts = label[j].pts * iwhs[i]
+                w, h = crops[i].shape[1::-1]
+                if h < w:
+                    pts[1][:] -= 0.5 * (w-h)
+                else:
+                    pts[0][:] -= 0.5 * (h-w)
                 self.black(crops[i], pts)
         return ptss
 
