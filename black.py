@@ -1,63 +1,87 @@
-from unittest import result
 import cv2
 import time
-from matplotlib.transforms import BboxBase
 import numpy as np
-from iwpod_net.src.keras_utils import *
-from iwpod_net.src.utils import *
 import os.path as osp
-import sys
 from CenterTrack_ROOT.src._init_paths import add_path
-import tensorflow as tf
 from torchvision.ops import nms 
 import torch
+import torchvision
+import imp
+MainModel = imp.load_source('MainModel', "load_model.py")
 
 this_dir = osp.dirname(__file__)
-
-# Add lib to PYTHONPATH
-lib_path = osp.join(this_dir, 'lib')
-add_path(lib_path)
 
 
 from crop_detector import Detector
 from opts import opts
 
-#def find_LP():
-    
-    # rewrite detect_LP_width
-
-    # resize
-
-    # put through prediction 
-
-    # reconsturct batch
-
-    # convert back to original coordinates
-
-    # 
 
 class blacker():
     def __init__(self, read_path, write_path):
         self.vid = cv2.VideoCapture(read_path)
-        #for i in range(100):
-        #    self.vid.read()
         size = cv2.VideoCapture(read_path).read()[1].shape[:2][::-1]
         print(size)
-        self.writer = cv2.VideoWriter(write_path, cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), self.vid.get(cv2.CAP_PROP_FPS), size)
-        self.iwpod_net = load_model('iwpod_net/weights/iwpod_net')
         ct_opt = opts().init()
         self.ct = Detector(ct_opt)
-        self.count = 1
+        self.crop_size = np.array([300, 300])
+        self.writer = cv2.VideoWriter(write_path, cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), self.vid.get(cv2.CAP_PROP_FPS), size)
+        self.model = torch.load('plate.pth').to('cuda')
+        self.count = 0
     
     # Black out the license plates in the input image COMPLETE
     def black(self, crop, pts):
-        parsed = []
-        if pts == []:
-            return
-        for i in range(4):
-            parsed.append([pts[0][i], pts[1][i]])
-        parsed = np.array(parsed).reshape((1, 4, 2)).astype(np.int32)
-        cv2.fillPoly(crop, pts=parsed, color=(0, 0, 0))
+        cv2.fillPoly(crop, [pts], (0, 0, 0))
+
+
+    def decode(self, result, threshold=0.1):
+        result = result.to('cpu').numpy()
+        net_stride = 2**4
+        side = 7.75
+
+        Probs = result[..., 0]
+        Affines = result[...,-6:]
+
+        try:
+            xx, yy = np.where(Probs>threshold)
+            print('hey')
+            print(xx)
+            if(len(xx) == 0):
+                print(Probs)
+                print(max(Probs))
+                return False
+        except:
+            return False
+
+        WH = self.crop_size
+        MN = WH/net_stride
+
+        base = np.matrix([[-.5,-.5,1.],[.5,-.5,1.],[.5,.5,1.],[-.5,.5,1.]]).T
+        conf = np.zeros((len(xx)))
+        ptss = np.zeros((len(xx), 4, 2))
+
+        for i in range(len(xx)):
+            y, x = xx[i], yy[i]
+            affine = Affines[y, x]
+            prob = Probs[y, x]
+
+            mn = np.array([float(x) + .5, float(y) + .5])
+
+            A = np.reshape(affine, (2, 3))
+            A[0, 0] = max(0., A[0, 0])
+            A[1, 1] = max(0., A[1, 1])
+            pts = np.array(A*base)
+            pts_MN_center_mn = pts * side
+            pts_MN = pts_MN_center_mn + mn.reshape((2, 1))
+            
+            pts_prop = pts_MN/MN.reshape((2, 1))
+
+            pts_prop = pts_prop.T.reshape(4, 2)
+
+            conf[i] = prob
+            ptss[i] = pts_prop
+
+        return ptss[np.argmax(conf)]
+        
 
     def locate_vehicles(self, frame):
         if self.count % 7 == 1:
@@ -70,93 +94,80 @@ class blacker():
             scores.append(item['score'])
             bboxes.append(item['bbox'])
             # cv2.rectangle(frame, ((int)(item['bbox'][0]), (int)(item['bbox'][1])), ((int)(item['bbox'][2]), (int)(item['bbox'][3])), (0, 255, 0), 2)
-        print(len(scores))
         scores = torch.Tensor(scores)
         bboxes = torch.Tensor(bboxes)
         idx = nms(bboxes, scores, 0.5)
-        print(len(idx))
         bboxes = bboxes[idx]
         self.count += 1
+        print(len(bboxes))
         return bboxes
 
     def crop_vehicle(self, frame, bboxes):
         crops = []
         for box in bboxes:
             crop = frame[int(box[1]):int(box[3]), int(box[0]):int(box[2]), :]
+            print(crop.shape)
             if 0 in crop.shape:
                 continue
             crops.append(crop)
         return crops
 
-    # Find license plates in crops of the input image COMPLETE
-    def locate_LP(self, crops):
-        ptss = []
-        lp_output_resolution = tuple((240, 80))
-        #crops_resized = np.array((len(crops), 56, 64, 3))
-        for crop in crops:
-            #crops_resized[i] = cv2.resize(crops[i],(64, 56), interpolation = cv2.INTER_CUBIC)
-
-            
-            
-            iwh = np.array(crop.shape[1::-1],dtype=float).reshape((2,1))
-            ASPECTRATIO = max(1, min(2.75, 1.0*crop.shape[1]/crop.shape[0]))  # width over height
-            WPODResolution = 256
-            Llp, LlpImgs, _ = detect_lp_width(self.iwpod_net, im2single(crop), WPODResolution*ASPECTRATIO, 2**1, lp_output_resolution, 0.01)
-            for i, img in enumerate(LlpImgs):
-                pts = Llp[i].pts * iwh
-                self.black(crop, pts)
-            
-        return ptss
-
-    def locate_LP_alt(self, crops):
-        ptss = []
-        lp_output_resolution = tuple((240, 80))
-        crops_resized = np.zeros((len(crops), 96, 96, 3))
-        iwhs = np.zeros((len(crops), 2, 1))
+    def plate_detection(self, crops):
+        crops_resized = torch.zeros((len(crops), 3, self.crop_size[0], self.crop_size[1]), device='cuda')
         for i in range(len(crops)):
-            crops_resized[i] = im2single(tf.image.resize_with_pad(crops[i], 96, 96).numpy().astype(np.uint8))
-            #cv2.imshow('hu', tf.image.resize_with_pad(crops[i], 56, 64).numpy().astype(np.uint8))
-            #cv2.waitKey(0)
-            s = max(crops[i].shape[1::-1])
-            iwhs[i] = np.array([s, s],dtype=float).reshape((2,1))
-        results = self.iwpod_net.predict(crops_resized)
-        
+            print(i)
+            h, w = crops[i].shape[:2]
+            resize_dim = []
+            pad_dim = []
+            if h > w:
+                resize_dim = (int(self.crop_size[1] * w / h), self.crop_size[0])
+                pad_dim =  (0, self.crop_size[1] - resize_dim[0] , 0, 0)
+            else:
+                resize_dim = (self.crop_size[1], int(self.crop_size[0] * h / w))
+                pad_dim = (0, 0, 0, self.crop_size[0] - resize_dim[1])
+
+            resized = torch.from_numpy(cv2.resize(crops[i], resize_dim)).permute(2, 0, 1).to('cuda')
+            resized = torch.nn.functional.pad(resized, pad_dim).type(torch.float32) / 255
+            crops_resized[i] = resized
+
+        with torch.no_grad():
+            results = self.model(crops_resized)
+
+        results = results.permute(0, 2, 3, 1)
         for i in range(len(crops)):
-            label, TLps = reconstruct_new(crops[i], crops_resized[i], results[i], lp_output_resolution, 0.01)
-            label, TLps = FindBestLP(label, TLps)
-            for j, img in enumerate(TLps):
-                pts = label[j].pts * iwhs[i]
-                w, h = crops[i].shape[1::-1]
-                if h < w:
-                    pts[1][:] -= 0.5 * (w-h)
-                else:
-                    pts[0][:] -= 0.5 * (h-w)
-                self.black(crops[i], pts)
-        return ptss
+            pts = self.decode(results[i], 0.01)
+            if isinstance(pts, bool):
+                continue
+            long_side = max(crops[i].shape[:2])
+            pts = (pts * long_side).astype(np.int32)
+            self.black(crops[i], pts)
 
     def step(self):
+        torch.cuda.synchronize()
         time_one = time.time()
         ret, frame = self.vid.read()
+        torch.cuda.synchronize()
         time_two = time.time()
         print('read took time:', time_two - time_one)
         if not ret:
             return False
-        #cv2.imshow('frame', frame)
-        #cv2.waitKey(0)
         bboxes_vehicle = self.locate_vehicles(frame)
         crops = self.crop_vehicle(frame, bboxes_vehicle)
+        torch.cuda.synchronize()
         time_three = time.time()
         print('ct took time:', time_three - time_two)
-        self.locate_LP_alt(crops)
+        self.plate_detection(crops)
+        torch.cuda.synchronize()
         time_four = time.time()
         print('LP took time:', time_four - time_three)
         self.writer.write(frame)
+        torch.cuda.synchronize()
         time_five = time.time()
         print('write took time:', time_five - time_four)
         return True
 
     def run(self):
-        while self.step():
+        while self.step() and self.count < 5:
             print(self.count)
             pass
         self.writer.release()
@@ -164,14 +175,12 @@ class blacker():
         
 
 if __name__ == '__main__':
-    black = blacker('./images/demo.mp4', './images/night_black.mp4')
-    bef = time.time()
+    black = blacker('./images/original.mkv', './images/edited.mkv')
+    #im = np.array([cv2.imread('./images/hey.jpg')])
+    #print(im.shape)
+    #black.plate_detection(im)
     black.run()
-    aft = time.time()
-    print('Time: ', aft - bef)
-#bef = time.time()
-#for i in range(10):
-#    obj.step()
-#after = time.time()
-#print(after-bef)
-#obj.writer.release()
+
+    #input = torch.from_numpy(crops.astype(np.float32)).permute(0, 3, 1, 2).to('cuda')
+    #print(res.permute(0, 2, 3, 1))
+    
